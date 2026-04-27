@@ -131,7 +131,7 @@ jobs:
           path: _stage/VCVRackMcpServer
 
 # =============================================================================
-# Job 4 — Build Windows x64 (MSVC via Visual Studio)
+# Job 4 — Build Windows x64 (Clang — compatible with Rack SDK __attribute__)
 # =============================================================================
   build-windows:
     name: Build (win-x64)
@@ -145,11 +145,8 @@ jobs:
           path: plugin.json
           key: ${{ github.sha }}-${{ github.run_id }}
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Install CMake and Ninja
-        run: choco install cmake ninja zip jq --no-progress --yes
+      - name: Install CMake, Ninja, and LLVM/Clang
+        run: choco install cmake ninja llvm zip jq --no-progress --yes
 
       - name: Cache Rack SDK (win-x64)
         uses: actions/cache@v4
@@ -160,15 +157,17 @@ jobs:
       - name: Configure + build
         run: |
           cmake -B build `
-            -G "Visual Studio 17 2022" `
-            -A x64
-          cmake --build build --config Release --parallel
+            -G Ninja `
+            -DCMAKE_C_COMPILER=clang `
+            -DCMAKE_CXX_COMPILER=clang++ `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
         shell: pwsh
 
       - name: Stage build output
         run: |
           mkdir -p _stage/VCVRackMcpServer/res
-          cp build/Release/plugin.dll _stage/VCVRackMcpServer/
+          cp build/plugin.dll _stage/VCVRackMcpServer/
           cp build/plugin.json _stage/VCVRackMcpServer/plugin.json
           cp -Recurse res/. _stage/VCVRackMcpServer/res/
         shell: pwsh

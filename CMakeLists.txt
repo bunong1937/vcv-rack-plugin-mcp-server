@@ -149,7 +149,6 @@ set_target_properties(VCVRackMcpServer PROPERTIES
   PREFIX   ""
   SUFFIX   ${PLUGIN_EXT}
   OUTPUT_NAME "plugin"
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
 target_include_directories(VCVRackMcpServer PRIVATE
@@ -160,30 +159,18 @@ target_include_directories(VCVRackMcpServer PRIVATE
 )
 
 target_compile_options(VCVRackMcpServer PRIVATE
-  $<$<CXX_COMPILER_ID:MSVC>:
-    /O2
-    /W4
-    /fp:fast
-    /utf-8
-  >
-  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:
-    -fPIC
-    -O3
-    -funsafe-math-optimizations
-    -fno-omit-frame-pointer
-    -Wall -Wextra -Wno-unused-parameter
-  >
+  -fPIC
+  -O3
+  -funsafe-math-optimizations
+  -fno-omit-frame-pointer
+  $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wno-unused-parameter>
 )
 
 # Platform-specific optimization flags
-if(MSVC)
-  if(RACK_ARCH STREQUAL "win-x64")
-    target_compile_options(VCVRackMcpServer PRIVATE /arch:SSE2)
-  endif()
-elseif(RACK_ARCH STREQUAL "lin-x64")
-  target_compile_options(VCVRackMcpServer PRIVATE -march=nocona)
+if(RACK_ARCH STREQUAL "lin-x64" OR RACK_ARCH STREQUAL "win-x64")
+  target_compile_options(VCVRackMcpServer PRIVATE -march=nocona)  # SSE4.2 baseline for x64
 elseif(RACK_ARCH STREQUAL "mac-x64")
-  target_compile_options(VCVRackMcpServer PRIVATE -march=nehalem)
+  target_compile_options(VCVRackMcpServer PRIVATE -march=nehalem)  # SSE4.2 for Intel Mac
 endif()
 # mac-arm64 doesn't need -march flag
 
