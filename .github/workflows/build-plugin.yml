@@ -131,12 +131,15 @@ jobs:
           path: _stage/VCVRackMcpServer
 
 # =============================================================================
-# Job 4 — Build Windows x64 (Clang — compatible with Rack SDK __attribute__)
+# Job 4 — Build Windows x64 (MinGW-w64 with GCC 13 — Rack SDK uses pthreads)
 # =============================================================================
   build-windows:
     name: Build (win-x64)
     needs: modify-plugin-version
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
@@ -145,8 +148,16 @@ jobs:
           path: plugin.json
           key: ${{ github.sha }}-${{ github.run_id }}
 
-      - name: Install CMake, Ninja, and LLVM/Clang
-        run: choco install cmake ninja llvm zip jq --no-progress --yes
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            zip
+            jq
 
       - name: Cache Rack SDK (win-x64)
         uses: actions/cache@v4
@@ -156,21 +167,17 @@ jobs:
 
       - name: Configure + build
         run: |
-          cmake -B build `
-            -G Ninja `
-            -DCMAKE_C_COMPILER=clang `
-            -DCMAKE_CXX_COMPILER=clang++ `
+          cmake -B build \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel
-        shell: pwsh
 
       - name: Stage build output
         run: |
           mkdir -p _stage/VCVRackMcpServer/res
           cp build/plugin.dll _stage/VCVRackMcpServer/
           cp build/plugin.json _stage/VCVRackMcpServer/plugin.json
-          cp -Recurse res/. _stage/VCVRackMcpServer/res/
-        shell: pwsh
+          cp -R res/. _stage/VCVRackMcpServer/res/
 
       - uses: actions/upload-artifact@v4
         with:

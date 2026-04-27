@@ -1,150 +1,79 @@
 cmake_minimum_required(VERSION 3.21)
-project(VCVRackMcpServer VERSION 2.1.1 LANGUAGES CXX)
-# NOTE: The major version MUST be 2 — VCV Rack 2 rejects plugins whose
-# version does not start with "2." (ABI compatibility check).
-# Use minor.patch for your own versioning: 2.<minor>.<patch>
-
-# =============================================================================
-# vcv-rack-mcp-server — VCV Rack 2 Plugin  (CMake build)
-#
-# USAGE:
-#   cmake -B build
-#   cmake --build build
-#   cmake --install build   # installs to Rack plugins folder
-#
-# CMake automatically downloads:
-#   - cpp-httplib (into dep/include)
-#   - Rack SDK (into build/_deps/rack-sdk, cached between builds)
-#
-# Optional: Use your own Rack SDK with -DRACK_DIR=/path/to/Rack-SDK
-# =============================================================================
+project(VCVRackMcpServer VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ── Detect platform/architecture early ───────────────────────────────────────
+# =============================================================================
+# Platform & architecture detection
+# =============================================================================
 if(APPLE)
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+  set(PLUGIN_EXT .dylib)
+elseif(WIN32)
+  set(PLUGIN_EXT .dll)
+else()
+  set(PLUGIN_EXT .so)
+endif()
+
+if(WIN32)
+  set(RACK_ARCH "win-x64")
+elseif(APPLE)
+  set(CMAKE_OSX_ARCHITECTURES "${CMAKE_SYSTEM_PROCESSOR}")
+  if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     set(RACK_ARCH "mac-arm64")
   else()
     set(RACK_ARCH "mac-x64")
   endif()
-  set(PLUGIN_EXT ".dylib")
-elseif(WIN32)
-  set(RACK_ARCH "win-x64")
-  set(PLUGIN_EXT ".dll")
 else()
   set(RACK_ARCH "lin-x64")
-  set(PLUGIN_EXT ".so")
 endif()
 
-# ── Rack SDK auto-download and location ──────────────────────────────────────
-set(RACK_SDK_VERSION "2.6.6")
-
+# =============================================================================
+# Dependency 1 — Rack SDK (auto-download if missing)
+# =============================================================================
 if(NOT DEFINED RACK_DIR)
-  if(DEFINED ENV{RACK_DIR})
-    set(RACK_DIR $ENV{RACK_DIR})
-  else()
-    # Auto-download Rack SDK if not provided
-    set(RACK_SDK_URL "https://vcvrack.com/downloads/Rack-SDK-${RACK_SDK_VERSION}-${RACK_ARCH}.zip")
-    set(RACK_SDK_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/rack-sdk")
-    set(RACK_DIR "${RACK_SDK_DOWNLOAD_DIR}/Rack-SDK")
-    
-    if(NOT EXISTS "${RACK_DIR}/include/rack.hpp")
-      message(STATUS "Rack SDK not found. Downloading from ${RACK_SDK_URL}...")
-      
-      file(MAKE_DIRECTORY "${RACK_SDK_DOWNLOAD_DIR}")
-      set(RACK_SDK_ZIP "${RACK_SDK_DOWNLOAD_DIR}/Rack-SDK.zip")
-      
-      # Download SDK
-      file(DOWNLOAD
-        "${RACK_SDK_URL}"
-        "${RACK_SDK_ZIP}"
-        STATUS RACK_SDK_DOWNLOAD_STATUS
-        SHOW_PROGRESS
-        TLS_VERIFY ON
-      )
-      
-      list(GET RACK_SDK_DOWNLOAD_STATUS 0 RACK_SDK_DOWNLOAD_CODE)
-      list(GET RACK_SDK_DOWNLOAD_STATUS 1 RACK_SDK_DOWNLOAD_MESSAGE)
-      
-      if(NOT RACK_SDK_DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download Rack SDK: ${RACK_SDK_DOWNLOAD_MESSAGE}")
-      endif()
-      
-      # Extract SDK
-      message(STATUS "Extracting Rack SDK...")
-      file(ARCHIVE_EXTRACT
-        INPUT "${RACK_SDK_ZIP}"
-        DESTINATION "${RACK_SDK_DOWNLOAD_DIR}"
-      )
-      
-      # Verify extraction
-      if(NOT EXISTS "${RACK_DIR}/include/rack.hpp")
-        message(FATAL_ERROR "Failed to extract Rack SDK. rack.hpp not found at ${RACK_DIR}/include/rack.hpp")
-      endif()
-      
-      message(STATUS "Rack SDK downloaded and extracted successfully")
-    else()
-      message(STATUS "Using cached Rack SDK at: ${RACK_DIR}")
-    endif()
+  set(RACK_SDK_URL "https://vcvrack.com/downloads/Rack-SDK-2.6.6-${RACK_ARCH}.zip")
+  set(RACK_SDK_ZIP "${CMAKE_BINARY_DIR}/_deps/Rack-SDK.zip")
+  set(RACK_DIR "${CMAKE_BINARY_DIR}/_deps/rack-sdk/Rack-SDK")
+  if(NOT EXISTS "${RACK_DIR}")
+    message(STATUS "Rack SDK not found. Downloading from ${RACK_SDK_URL}...")
+    file(DOWNLOAD "${RACK_SDK_URL}" "${RACK_SDK_ZIP}" SHOW_PROGRESS TLS_VERIFY ON)
+    message(STATUS "Extracting Rack SDK...")
+    file(ARCHIVE_EXTRACT INPUT "${RACK_SDK_ZIP}" DESTINATION "${CMAKE_BINARY_DIR}/_deps/rack-sdk")
+    message(STATUS "Rack SDK downloaded and extracted successfully")
   endif()
 endif()
 
+# Resolve to absolute path for reproducible IDE integration
+get_filename_component(RACK_DIR "${RACK_DIR}" ABSOLUTE)
+if(NOT EXISTS "${RACK_DIR}")
+  message(FATAL_ERROR "Rack SDK not found at ${RACK_DIR}. Set -DRACK_DIR= or fix the download.")
+endif()
 message(STATUS "Using Rack SDK at: ${RACK_DIR}")
 
-# ── Generate plugin.json from template (single source of truth: PROJECT_VERSION) ─
-configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/plugin.json.in
-  ${CMAKE_CURRENT_BINARY_DIR}/plugin.json
-  @ONLY
-)
-
-# ── Dependency auto-download: cpp-httplib (header-only, MIT) ─────────────────
-set(HTTPLIB_VERSION_FILE ${CMAKE_CURRENT_SOURCE_DIR}/deps/httplib.version)
-if(EXISTS ${HTTPLIB_VERSION_FILE})
-  file(READ ${HTTPLIB_VERSION_FILE} HTTPLIB_VERSION)
-  string(STRIP "${HTTPLIB_VERSION}" HTTPLIB_VERSION)
-else()
-  set(HTTPLIB_VERSION "v0.18.0")
+# =============================================================================
+# Dependency 2 — cpp-httplib (auto-download if missing)
+# =============================================================================
+set(HTTPLIB_VERSION "0.18.0")
+set(HTTPLIB_DIR "${CMAKE_BINARY_DIR}/_deps/cpp-httplib-${HTTPLIB_VERSION}")
+if(NOT EXISTS "${HTTPLIB_DIR}")
+  message(STATUS "Downloading cpp-httplib v${HTTPLIB_VERSION}...")
+  file(DOWNLOAD "https://github.com/yhirose/cpp-httplib/archive/refs/tags/v${HTTPLIB_VERSION}.tar.gz"
+       "${CMAKE_BINARY_DIR}/_deps/cpp-httplib.tar.gz" SHOW_PROGRESS TLS_VERIFY ON)
+  file(ARCHIVE_EXTRACT INPUT "${CMAKE_BINARY_DIR}/_deps/cpp-httplib.tar.gz"
+       DESTINATION "${CMAKE_BINARY_DIR}/_deps")
 endif()
 
-set(HTTPLIB_URL https://raw.githubusercontent.com/yhirose/cpp-httplib/${HTTPLIB_VERSION}/httplib.h)
-set(HTTPLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dep/include)
-set(HTTPLIB_HEADER ${HTTPLIB_INCLUDE_DIR}/httplib.h)
-
-if(NOT EXISTS ${HTTPLIB_HEADER})
-  file(MAKE_DIRECTORY ${HTTPLIB_INCLUDE_DIR})
-  message(STATUS "Downloading cpp-httplib ${HTTPLIB_VERSION}...")
-  file(DOWNLOAD
-    ${HTTPLIB_URL}
-    ${HTTPLIB_HEADER}
-    STATUS HTTPLIB_DOWNLOAD_STATUS
-    TLS_VERIFY ON
-  )
-  list(GET HTTPLIB_DOWNLOAD_STATUS 0 HTTPLIB_DOWNLOAD_CODE)
-  list(GET HTTPLIB_DOWNLOAD_STATUS 1 HTTPLIB_DOWNLOAD_MESSAGE)
-  if(NOT HTTPLIB_DOWNLOAD_CODE EQUAL 0)
-    message(FATAL_ERROR "Failed to download cpp-httplib: ${HTTPLIB_DOWNLOAD_MESSAGE}")
-  endif()
-endif()
-
-# ── Rack SDK include / link paths ─────────────────────────────────────────────
-set(RACK_INCLUDE_DIR  ${RACK_DIR}/include)
-set(RACK_DEP_DIR      ${RACK_DIR}/dep/include)
-set(RACK_LIB          ${RACK_DIR}/libRack${CMAKE_SHARED_LIBRARY_SUFFIX})
-
-if(NOT EXISTS ${RACK_INCLUDE_DIR}/rack.hpp)
-  message(FATAL_ERROR "rack.hpp not found in ${RACK_INCLUDE_DIR}. Check RACK_DIR.")
-endif()
-
-# ── Plugin shared library ─────────────────────────────────────────────────────
-add_library(VCVRackMcpServer MODULE
+# =============================================================================
+# Targets
+# =============================================================================
+add_library(VCVRackMcpServer SHARED
   src/plugin.cpp
   src/RackMcpServer.cpp
 )
 
+# Make the plugin importable as a Python module for testing
 set_target_properties(VCVRackMcpServer PROPERTIES
   PREFIX   ""
   SUFFIX   ${PLUGIN_EXT}
@@ -152,104 +81,110 @@ set_target_properties(VCVRackMcpServer PROPERTIES
 )
 
 target_include_directories(VCVRackMcpServer PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${RACK_INCLUDE_DIR}
-  ${RACK_DEP_DIR}
-  ${HTTPLIB_INCLUDE_DIR}
+  src
+  ${RACK_DIR}/include
+  ${RACK_DIR}/dep/include
+  ${CMAKE_BINARY_DIR}/_deps/cpp-httplib-${HTTPLIB_VERSION}/single_include
 )
 
-target_compile_options(VCVRackMcpServer PRIVATE
-  -O3
-  $<$<NOT:$<PLATFORM_ID:Windows>>:
-    -fPIC
-    -funsafe-math-optimizations
-    -fno-omit-frame-pointer
-  >
-  $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wno-unused-parameter>
-)
-
-# Platform-specific optimization flags
-if(RACK_ARCH STREQUAL "lin-x64")
-  target_compile_options(VCVRackMcpServer PRIVATE -march=nocona)
-elseif(RACK_ARCH STREQUAL "mac-x64")
-  target_compile_options(VCVRackMcpServer PRIVATE -march=nehalem)
-endif()
-# win-x64 doesn't use -march flag with Clang targeting MSVC ABI
-
-# Define platform macro (replace hyphens with underscores for valid C++ identifiers)
-string(REPLACE "-" "_" RACK_ARCH_MACRO "${RACK_ARCH}")
-target_compile_definitions(VCVRackMcpServer PRIVATE
-  ARCH_${RACK_ARCH_MACRO}   # lets source code #ifdef on arch if needed
-)
-
-# Windows-specific: define _USE_MATH_DEFINES to enable M_PI, M_SQRT2, etc.
+# =============================================================================
+# Compile options — per platform
+# =============================================================================
 if(WIN32)
+  # Windows: MinGW-w64 or MSVC
   target_compile_definitions(VCVRackMcpServer PRIVATE
     _USE_MATH_DEFINES
+    WIN32_LEAN_AND_MEAN
+  )
+  if(MSVC)
+    target_compile_options(VCVRackMcpServer PRIVATE
+      /utf-8 /W4 /O2 /EHsc
+    )
+  else()
+    # MinGW-w64
+    target_compile_options(VCVRackMcpServer PRIVATE
+      -Wall -Wextra -Wno-unused-parameter -O3
+      -funsafe-math-optimizations
+      -fno-omit-frame-pointer
+    )
+  endif()
+elseif(APPLE)
+  target_compile_options(VCVRackMcpServer PRIVATE
+    -Wall -Wextra -Wno-unused-parameter -O3
+    -fPIC -funsafe-math-optimizations -fno-omit-frame-pointer
+  )
+  if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+    target_compile_options(VCVRackMcpServer PRIVATE -march=nehalem)
+  endif()
+else()
+  target_compile_options(VCVRackMcpServer PRIVATE
+    -Wall -Wextra -Wno-unused-parameter -O3
+    -fPIC -funsafe-math-optimizations -fno-omit-frame-pointer
+    -march=nocona
   )
 endif()
 
+# Define platform macro
+string(REPLACE "-" "_" RACK_ARCH_MACRO "${RACK_ARCH}")
+target_compile_definitions(VCVRackMcpServer PRIVATE
+  ARCH_${RACK_ARCH_MACRO}
+)
+
+# =============================================================================
+# Link options — per platform
+# =============================================================================
 if(APPLE)
   target_link_options(VCVRackMcpServer PRIVATE
-    -undefined dynamic_lookup   # Rack symbols resolved at load time by Rack
+    -undefined dynamic_lookup
     -Wl,-install_name,@rpath/plugin.dylib
   )
 elseif(UNIX)
   target_link_options(VCVRackMcpServer PRIVATE
-    -Wl,--allow-shlib-undefined  # same — Rack resolves symbols at load time
+    -Wl,--allow-shlib-undefined
   )
   target_link_libraries(VCVRackMcpServer PRIVATE pthread)
 elseif(WIN32)
-  target_link_options(VCVRackMcpServer PRIVATE
-    /EXPORT:createPlugin   # Export plugin entry point for Rack to load
-  )
   target_link_libraries(VCVRackMcpServer PRIVATE ws2_32 mswsock)
+  set_target_properties(VCVRackMcpServer PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+  )
 endif()
 
-# ── Install target ────────────────────────────────────────────────────────────
-# Determines Rack plugins folder per platform
-if(APPLE)
-  set(RACK_PLUGINS_DIR "$ENV{HOME}/Library/Application Support/Rack2/plugins-${RACK_ARCH}")
-elseif(WIN32)
-  set(RACK_PLUGINS_DIR "$ENV{APPDATA}/Rack2/plugins")
+# =============================================================================
+# Install & dist targets
+# =============================================================================
+if(WIN32)
+  set(INSTALL_DIR "$ENV{APPDATA}/Rack2/plugins/VCVRackMcpServer")
+elseif(APPLE)
+  if(RACK_ARCH STREQUAL "mac-arm64")
+    set(INSTALL_DIR "$ENV{HOME}/Documents/Rack2/plugins-mac-arm64/VCVRackMcpServer")
+  else()
+    set(INSTALL_DIR "$ENV{HOME}/Documents/Rack2/plugins-mac-x64/VCVRackMcpServer")
+  endif()
 else()
-  set(RACK_PLUGINS_DIR "$ENV{HOME}/.Rack2/plugins")
+  set(INSTALL_DIR "$ENV{HOME}/.local/share/Rack2/plugins-lin-x64/VCVRackMcpServer")
 endif()
-
-set(PLUGIN_INSTALL_DIR ${RACK_PLUGINS_DIR}/VCVRackMcpServer)
+message(STATUS "Install target: ${INSTALL_DIR}")
 
 install(TARGETS VCVRackMcpServer
-  LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+  DESTINATION "${INSTALL_DIR}"
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/plugin.json
-  DESTINATION ${PLUGIN_INSTALL_DIR}
-)
-install(DIRECTORY res/
-  DESTINATION ${PLUGIN_INSTALL_DIR}/res
-  OPTIONAL
-)
+install(FILES "plugin.json" DESTINATION "${INSTALL_DIR}")
+install(DIRECTORY "res/" DESTINATION "${INSTALL_DIR}/res")
 
-message(STATUS "Install target: ${PLUGIN_INSTALL_DIR}")
-
-# ── Package target (.zip archive for GitHub Releases / manual install) ─
-set(PACKAGE_ROOT_DIR "${CMAKE_BINARY_DIR}/package/${PROJECT_NAME}")
-set(DIST_DIR "${CMAKE_SOURCE_DIR}/dist")
-set(DIST_ARCHIVE_PATH "${DIST_DIR}/${PROJECT_NAME}-${PROJECT_VERSION}-${RACK_ARCH}.zip")
-
+# Dist target
 add_custom_target(dist
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/package"
-  COMMAND ${CMAKE_COMMAND} -E rm -rf "${PACKAGE_ROOT_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${PACKAGE_ROOT_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:VCVRackMcpServer>" "${PACKAGE_ROOT_DIR}/plugin${PLUGIN_EXT}"
-  COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/plugin.json" "${PACKAGE_ROOT_DIR}/plugin.json"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/res" "${PACKAGE_ROOT_DIR}/res"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_BINARY_DIR}/package" ${CMAKE_COMMAND} -E tar "cf" "${DIST_ARCHIVE_PATH}" --format=zip "${PROJECT_NAME}"
+  COMMAND ${CMAKE_COMMAND} -E echo "Packaging distributable..."
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dist/VCVRackMcpServer"
+  COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:VCVRackMcpServer>" "${CMAKE_BINARY_DIR}/dist/VCVRackMcpServer/"
+  COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/plugin.json" "${CMAKE_BINARY_DIR}/dist/VCVRackMcpServer/"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/res" "${CMAKE_BINARY_DIR}/dist/VCVRackMcpServer/res"
+  COMMAND ${CMAKE_COMMAND} -E tar "cf" "${CMAKE_BINARY_DIR}/dist/VCVRackMcpServer-${RACK_ARCH}.zip" --format=zip "${CMAKE_BINARY_DIR}/dist/VCVRackMcpServer"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   DEPENDS VCVRackMcpServer
-  COMMENT "Packaging ${DIST_ARCHIVE_PATH}"
+  COMMENT "Creating ${RACK_ARCH} distributable"
 )
 
-# ── Summary ───────────────────────────────────────────────────────────────────
 message(STATUS "vcv-rack-mcp-server plugin configured.")
 message(STATUS "  Platform : ${RACK_ARCH}")
 message(STATUS "  Rack SDK : ${RACK_DIR}")
