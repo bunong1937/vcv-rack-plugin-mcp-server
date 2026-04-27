@@ -153,11 +153,15 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
             zip
             jq
+
+      - name: Pin GCC to 14.x (SIMDE compatible)
+        run: |
+          gcc --version | head -1
 
       - name: Cache Rack SDK (win-x64)
         uses: actions/cache@v4
