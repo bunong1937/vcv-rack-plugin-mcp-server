@@ -159,20 +159,22 @@ target_include_directories(VCVRackMcpServer PRIVATE
 )
 
 target_compile_options(VCVRackMcpServer PRIVATE
-  -fPIC
   -O3
-  -funsafe-math-optimizations
-  -fno-omit-frame-pointer
+  $<$<NOT:$<PLATFORM_ID:Windows>>:
+    -fPIC
+    -funsafe-math-optimizations
+    -fno-omit-frame-pointer
+  >
   $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wno-unused-parameter>
 )
 
 # Platform-specific optimization flags
-if(RACK_ARCH STREQUAL "lin-x64" OR RACK_ARCH STREQUAL "win-x64")
-  target_compile_options(VCVRackMcpServer PRIVATE -march=nocona)  # SSE4.2 baseline for x64
+if(RACK_ARCH STREQUAL "lin-x64")
+  target_compile_options(VCVRackMcpServer PRIVATE -march=nocona)
 elseif(RACK_ARCH STREQUAL "mac-x64")
-  target_compile_options(VCVRackMcpServer PRIVATE -march=nehalem)  # SSE4.2 for Intel Mac
+  target_compile_options(VCVRackMcpServer PRIVATE -march=nehalem)
 endif()
-# mac-arm64 doesn't need -march flag
+# win-x64 doesn't use -march flag with Clang targeting MSVC ABI
 
 # Define platform macro (replace hyphens with underscores for valid C++ identifiers)
 string(REPLACE "-" "_" RACK_ARCH_MACRO "${RACK_ARCH}")
