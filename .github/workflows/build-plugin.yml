@@ -2,11 +2,11 @@ name: Build VCV Rack Plugin
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, master, develop]
     tags:
       - 'v*'
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 defaults:
   run:
