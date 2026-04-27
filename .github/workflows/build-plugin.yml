@@ -131,15 +131,12 @@ jobs:
           path: _stage/VCVRackMcpServer
 
 # =============================================================================
-# Job 4 — Build Windows x64 (native runner, CMake + MSYS2/MinGW)
+# Job 4 — Build Windows x64 (MSVC via Visual Studio)
 # =============================================================================
   build-windows:
     name: Build (win-x64)
     needs: modify-plugin-version
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
@@ -148,16 +145,11 @@ jobs:
           path: plugin.json
           key: ${{ github.sha }}-${{ github.run_id }}
 
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-ninja
-            zip
-            jq
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install CMake and Ninja
+        run: choco install cmake ninja zip jq --no-progress --yes
 
       - name: Cache Rack SDK (win-x64)
         uses: actions/cache@v4
@@ -167,17 +159,19 @@ jobs:
 
       - name: Configure + build
         run: |
-          cmake -B build \
-            -G "Ninja" \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel
+          cmake -B build `
+            -G "Visual Studio 17 2022" `
+            -A x64
+          cmake --build build --config Release --parallel
+        shell: pwsh
 
       - name: Stage build output
         run: |
           mkdir -p _stage/VCVRackMcpServer/res
-          cp build/plugin.dll _stage/VCVRackMcpServer/
+          cp build/Release/plugin.dll _stage/VCVRackMcpServer/
           cp build/plugin.json _stage/VCVRackMcpServer/plugin.json
-          cp -R res/. _stage/VCVRackMcpServer/res/
+          cp -Recurse res/. _stage/VCVRackMcpServer/res/
+        shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:
