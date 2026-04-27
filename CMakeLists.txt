@@ -84,7 +84,7 @@ target_include_directories(VCVRackMcpServer PRIVATE
   src
   ${RACK_DIR}/include
   ${RACK_DIR}/dep/include
-  ${CMAKE_BINARY_DIR}/_deps/cpp-httplib-${HTTPLIB_VERSION}/single_include
+  ${CMAKE_BINARY_DIR}/_deps/cpp-httplib-${HTTPLIB_VERSION}
 )
 
 # =============================================================================
