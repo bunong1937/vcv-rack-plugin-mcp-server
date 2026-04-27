@@ -1,0 +1,302 @@
+name: Build VCV Rack Plugin
+
+on:
+  push:
+    branches: [main, develop]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+# =============================================================================
+# Job 1 — Stamp plugin.json version with git short-sha on non-release builds
+# =============================================================================
+jobs:
+  modify-plugin-version:
+    name: Stamp plugin version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        id: plugin-version-cache
+        with:
+          path: plugin.json
+          key: ${{ github.sha }}-${{ github.run_id }}
+
+      - name: Append git sha to version (non-tag builds only)
+        if: "! startsWith(github.ref, 'refs/tags/v')"
+        run: |
+          gitrev=$(git rev-parse --short HEAD)
+          pluginversion=$(jq -r '.version' plugin.json)
+          echo "Stamping version: $pluginversion → $pluginversion-$gitrev"
+          jq --arg V "$pluginversion-$gitrev" '.version=$V' plugin.json > plugin.json.tmp
+          mv plugin.json.tmp plugin.json
+
+# =============================================================================
+# Job 2 — Build Linux x64 (native runner, CMake)
+# =============================================================================
+  build-linux:
+    name: Build (lin-x64)
+    needs: modify-plugin-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: plugin.json
+          key: ${{ github.sha }}-${{ github.run_id }}
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build jq zip
+
+      - name: Cache Rack SDK
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/rack-sdk
+          key: rack-sdk-lin-x64-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure + build
+        run: make all BUILD_DIR=build
+
+      - name: Stage build output
+        run: |
+          mkdir -p _stage/VCVRackMcpServer/res
+          cp build/plugin.so _stage/VCVRackMcpServer/
+          cp build/plugin.json _stage/VCVRackMcpServer/plugin.json
+          cp -R res/. _stage/VCVRackMcpServer/res/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-lin-x64
+          path: _stage/VCVRackMcpServer
+
+# =============================================================================
+# Job 3 — Build macOS x64 and ARM64 (native runners, CMake)
+# =============================================================================
+  build-mac:
+    name: Build (mac-${{ matrix.arch }})
+    needs: modify-plugin-version
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        include:
+          - arch: x64
+            cmake_osx_arch: x86_64
+          - arch: arm64
+            cmake_osx_arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: plugin.json
+          key: ${{ github.sha }}-${{ github.run_id }}
+
+      - name: Install build tools
+        run: brew install cmake jq zip
+
+      - name: Cache Rack SDK (mac-${{ matrix.arch }})
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/rack-sdk
+          key: rack-sdk-mac-${{ matrix.arch }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure + build (mac-${{ matrix.arch }})
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_osx_arch }}
+          cmake --build build --parallel
+
+      - name: Stage build output
+        run: |
+          mkdir -p _stage/VCVRackMcpServer/res
+          cp build/plugin.dylib _stage/VCVRackMcpServer/
+          cp build/plugin.json _stage/VCVRackMcpServer/plugin.json
+          cp -R res/. _stage/VCVRackMcpServer/res/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-mac-${{ matrix.arch }}
+          path: _stage/VCVRackMcpServer
+
+# =============================================================================
+# Job 4 — Build Windows x64 (native runner, CMake + MSYS2/MinGW)
+# =============================================================================
+  build-windows:
+    name: Build (win-x64)
+    needs: modify-plugin-version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: plugin.json
+          key: ${{ github.sha }}-${{ github.run_id }}
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
+            zip
+            jq
+
+      - name: Cache Rack SDK (win-x64)
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/rack-sdk
+          key: rack-sdk-win-x64-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure + build
+        run: |
+          cmake -B build \
+            -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Stage build output
+        run: |
+          mkdir -p _stage/VCVRackMcpServer/res
+          cp build/plugin.dll _stage/VCVRackMcpServer/
+          cp build/plugin.json _stage/VCVRackMcpServer/plugin.json
+          cp -R res/. _stage/VCVRackMcpServer/res/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-win-x64
+          path: _stage/VCVRackMcpServer
+
+# =============================================================================
+# Job 5 — Collect distributables after all builds succeed
+# =============================================================================
+  package-release-artifacts:
+    name: Collect release artifacts
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-mac, build-windows]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+          pattern: stage-*
+
+      - name: Build distributable bundles
+        run: |
+          version=$(jq -r '.version' plugin.json)
+          slug=$(jq -r '.slug' plugin.json)
+          mkdir -p _release
+
+          for artifact_dir in _artifacts/stage-*; do
+            artifact_name=$(basename "$artifact_dir")
+            platform="${artifact_name#stage-}"
+            out_file="_release/${slug}-${version}-${platform}.zip"
+
+            if [ -d "$artifact_dir/VCVRackMcpServer" ]; then
+              zip_root="$artifact_dir"
+              zip_entry="VCVRackMcpServer"
+            elif [ -f "$artifact_dir/plugin.json" ]; then
+              zip_root="$(dirname "$artifact_dir")"
+              zip_entry="$(basename "$artifact_dir")"
+            else
+              echo "Missing staged payload in $artifact_dir"
+              find "$artifact_dir" -maxdepth 3 -print | sort
+              exit 1
+            fi
+
+            (
+              cd "$zip_root"
+              zip -r "$GITHUB_WORKSPACE/$out_file" "$zip_entry"
+            )
+          done
+
+      - name: Show packaged files
+        run: find _release -maxdepth 1 -type f | sort
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundles
+          path: _release/*.zip
+
+# =============================================================================
+# Job 6 — Publish GitHub Release (only on version tags like v2.0.0)
+# =============================================================================
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [package-release-artifacts]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify plugin.json version matches tag
+        run: |
+          pluginversion=$(jq -r '.version' plugin.json)
+          tagversion="${GITHUB_REF_NAME#v}"
+          if [ "$pluginversion" != "$tagversion" ]; then
+            echo "ERROR: plugin.json version ($pluginversion) doesn't match tag ($tagversion)"
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+          name: release-bundles
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: vcv-rack-plugin-mcp-server ${{ github.ref_name }}
+          body: |
+            ## vcv-rack-plugin-mcp-server ${{ github.ref_name }}
+
+            VCV Rack 2 plugin: exposes Rack internals to AI clients (Claude, Cursor, etc.) via HTTP/MCP.
+
+            ### Install on macOS
+            1. Download the `.zip` that matches your Mac:
+               - `*-mac-arm64.zip` for Apple Silicon
+               - `*-mac-x64.zip` for Intel
+            2. Unzip it. This creates a `VCVRackMcpServer` folder.
+            3. Move `VCVRackMcpServer` into:
+               - `~/Library/Application Support/Rack2/plugins-mac-arm64/` on Apple Silicon
+               - `~/Library/Application Support/Rack2/plugins-mac-x64/` on Intel Macs
+            4. Restart VCV Rack.
+
+            ### Install on Linux
+            1. Download `*-lin-x64.zip`.
+            2. Unzip it. This creates a `VCVRackMcpServer` folder.
+            3. Move `VCVRackMcpServer` into `~/.local/share/Rack2/plugins-lin-x64/`.
+            4. Restart VCV Rack and add the `MCP Server` module from the module browser.
+
+            ### Install on Windows
+            1. Download `*-win-x64.zip`.
+            2. Unzip it. This creates a `VCVRackMcpServer` folder.
+            3. Move `VCVRackMcpServer` into `%APPDATA%\Rack2\plugins\`.
+            4. Restart VCV Rack and add the `MCP Server` module from the module browser.
+
+            ### What's new
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+          draft: false
+          prerelease: false
+          files: _artifacts/**/*.zip
