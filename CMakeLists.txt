@@ -193,6 +193,13 @@ target_compile_definitions(VCVRackMcpServer PRIVATE
   ARCH_${RACK_ARCH_MACRO}   # lets source code #ifdef on arch if needed
 )
 
+# Windows-specific: define _USE_MATH_DEFINES to enable M_PI, M_SQRT2, etc.
+if(WIN32)
+  target_compile_definitions(VCVRackMcpServer PRIVATE
+    _USE_MATH_DEFINES
+  )
+endif()
+
 if(APPLE)
   target_link_options(VCVRackMcpServer PRIVATE
     -undefined dynamic_lookup   # Rack symbols resolved at load time by Rack
