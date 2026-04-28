@@ -1154,7 +1154,7 @@ std::string RackHttpServer::dispatchTool(const std::string& name, const std::str
                         filtered.push_back(m);
                     }
                     if (filtered.empty()) continue;
-                    if (!firstPlug) out += ","; firstPlug = false;
+                    if (!firstPlug) { out += ","; } firstPlug = false;
                     out += "{\"slug\":" + jsonStr(plug->slug) + ",\"name\":" + jsonStr(plug->name) + ",\"modules\":[";
                     for (size_t i = 0; i < filtered.size(); i++) {
                         out += serializeModel(filtered[i]);
@@ -1194,7 +1194,7 @@ std::string RackHttpServer::dispatchTool(const std::string& name, const std::str
                     std::string itemQ = parseJsonString(item, "q");
                     std::string itemTags = parseJsonString(item, "tags");
                     if (!label.empty()) {
-                        if (!firstEntry) result += ","; firstEntry = false;
+                        if (!firstEntry) { result += ","; } firstEntry = false;
                         result += jsonStr(label) + ":" + runSearch(itemTags, itemQ);
                     }
                 }
@@ -1634,7 +1634,7 @@ void RackHttpServer::setupRoutes() {
                     filtered.push_back(m);
                 }
                 if (filtered.empty()) continue;
-                if (!firstPlugin) body += ", "; firstPlugin = false;
+                if (!firstPlugin) { body += ", "; } firstPlugin = false;
                 body += "{\"slug\":" + jsonStr(plug->slug) + ", \"name\":" + jsonStr(plug->name) + ", \"modules\": [";
                 for (size_t i = 0; i < filtered.size(); i++) {
                     body += serializeModel(filtered[i]) + (i < filtered.size() - 1 ? ", " : "");
