@@ -17,6 +17,7 @@
 
 #include <sstream>
 #include <cstring>
+#include <cctype>
 #include <functional>
 #include <set>
 

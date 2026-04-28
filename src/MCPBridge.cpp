@@ -43,6 +43,7 @@
 
 #include <sstream>
 #include <cstring>
+#include <cctype>
 
 using namespace rack;
 
